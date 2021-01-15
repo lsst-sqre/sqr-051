@@ -13,7 +13,7 @@ serial_number: "051"
 doc_id: "SQR-051"
 
 # Title of the document, without the series/serial designation
-doc_title: "Cookie authentication considerations for the Rubin Science Platform"
+doc_title: "Leaks of credentials to services in the Rubin Science Platform"
 
 # Author names, ordered as a list. Each author name should be formatted as 'First Last'
 authors:
@@ -37,14 +37,21 @@ authors:
 copyright: "2021, Association of Universities for Research in Astronomy, Inc. (AURA)"
 
 # Description. A short, 1-2 sentence statemement used by document indices.
-description: "The current design for cookie authentication for the Rubin Science Platform leaks cookies to backend services. This undermines isolation between services, which could become relevant if a service is compromised. This document proposes an alternative design and discusses the complexity and effort trade-offs."
+description: >
+  Discusses the scenarios in which the current authentication mechanism
+  for the Rubin Science Platform can leak credentials to backend services,
+  proposes alternative designs, and discusses the complexity and effort
+  trade-offs.
 
 # Abstract, if available
-# abstract: >
-#           Write your paragraph
-#           here with multiple lines.
-#
-#           You can have multiple paragraphs too.
+abstract: >
+  The current design for authentication for the Rubin Science Platform
+  leaks cookies and user tokens to backend services.  This undermines
+  isolation between services, which could become relevant if a service is
+  compromised.  This document proposes several possible alternative
+  designs, including one that uses separate hostnames for each Rubin
+  Science Platform service, and discusses the complexity and effort
+  trade-offs.
 
 # URL where this document is published by Read the Docs. e.g. http://sqr-001.lsst.codes
 url: "https://sqr-051.lsst.io"
