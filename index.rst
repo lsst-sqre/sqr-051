@@ -85,6 +85,8 @@ Advantages:
 
 Disadvantages:
 
+- Does not isolate the JavaScript of each service.
+  All services are still in the same JavaScript origin, which means that malicious JavaScript injected into any service could still make authenticated requests to other services, even though the attacker would not have direct access to the cookie.
 - It's not clear how this stacks with ``auth_request`` subrequests, which are also done with proxying.
   The cookie and ``Authorization`` header must be included in that request.
   Some experimentation to find the right configuration may be required.
