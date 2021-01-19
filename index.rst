@@ -57,7 +57,7 @@ That header is also sent to the protected service after it is interpreted by the
 Alternative designs
 ===================
 
-The following alternative designs would avoid exposing authentication credentials to protecte services that could be used to access other protected services.
+The following alternative designs would avoid exposing authentication credentials to protected services that could be used to access other protected services.
 
 Strip Gafaelfawr cookie from proxied request
 --------------------------------------------
