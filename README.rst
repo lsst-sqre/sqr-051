@@ -7,14 +7,14 @@
   .. image:: https://zenodo.org/badge/doi/10.5281/zenodo.#####.svg
      :target: http://dx.doi.org/10.5281/zenodo.#####
 
-###################################################################
-Cookie authentication considerations for the Rubin Science Platform
-###################################################################
+##############################################################
+Leaks of credentials to services in the Rubin Science Platform
+##############################################################
 
 SQR-051
 =======
 
-The current design for cookie authentication for the Rubin Science Platform leaks cookies to backend services. This undermines isolation between services, which could become relevant if a service is compromised. This document proposes an alternative design and discusses the complexity and effort trade-offs.
+Discusses the scenarios in which the current authentication mechanism for the Rubin Science Platform can leak credentials to backend services, proposes alternative designs, and discusses the complexity and effort trade-offs.
 
 **Links:**
 
