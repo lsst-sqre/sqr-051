@@ -27,7 +27,7 @@ NGINX then can be configured to include those reply headers as request headers i
 
 Currently, a given deployment of the Rubin Science Platform uses a single hostname for all components.
 Different services are mounted on different routes under that hostname.
-For example, for a Rubin Science Platform deployment at ``https://data.lsst.cloud``, the Notebook Aspect is at ``https://data.lsst.cloud/nb``, the Portal Aspect is at ``https://data.lsst.cloud/portal/``, and so forth.
+For example, for a Rubin Science Platform deployment at ``https://data.lsst.cloud``, the Notebook Aspect is at ``https://data.lsst.cloud/nb``, the Portal Aspect is at ``https://data.lsst.cloud/portal``, and so forth.
 
 In general, all services running on the Rubin Science Platform are trusted.
 In some cases, such as the Notebook Aspect, the running notebook is always given an authentication token with most of the permissions as the user's session cookie.
@@ -47,9 +47,15 @@ Therefore, any service with a registered HTTP ingress in the Rubin Science Platf
 If that service is compromised, the attacker can obtain that cookie from the incoming request and use it to make browser requests to other services in the same Science Platform deployment with the credentials of the user.
 This includes requests to the Gafaelfawr authentication service itself to, for instance, create new, persistent authentication tokens for that user that would be under the control of the attacker.
 
-The implication is that internal authorization controls between the Rubin Science Platform components are only fully effective provided that an attacker cannot gain access to the raw headers of a request to one of the components.
-However, note that even if an attacker gains that access, they can only misuse credentials that are sent to the service while they have compromised that service.
+A related but slightly different problem is that, since all Rubin Science Platform services are running under the same hostname, they all share the same JavaScript trust domain.
+This means that a compromise of the web interface of any service (via XSS, for example) would allow an attacker to make authenticated requests to all other Rubin Science Platform services as the user.
+This has the same effect as stealing the user's authentication cookie but may be easier to accomplish.
+
+The implication is that internal authorization controls between the Rubin Science Platform components are only fully effective provided that an attacker cannot gain access to the raw headers of a request to one of the components and cannot inject JavaScript into the web interface.
+
+Note that even if an attacker gains that access, they can only misuse credentials that are sent to the service while they have compromised that service.
 They cannot make requests as arbitrary users who have not accessed the compromised service.
+However, a patient attacker could wait until a user with administrative permissions accesses the compromised service and then leverage their credentials to impersonate arbitrary users.
 
 The same problem exists for non-browser authentication using the ``Authorization`` header.
 That header is also sent to the protected service after it is interpreted by the ``auth_request`` handler.
@@ -76,7 +82,7 @@ A simpler approach also works for the ``Authorization`` header::
 
   proxy_set_header Authorization "";
 
-However, the Notebook Aspect also uses the ``Authorization`` header for its own internal purposes, so the logic may need to be more complex.
+However, the Notebook Aspect also uses the ``Authorization`` header for its own internal purposes, so the logic may need to be more complex, or the Notebook Aspect may need to be excluded.
 
 Advantages:
 
@@ -105,6 +111,8 @@ This could be done as follows:
 - Create a separate hostname for each service.
   In other words, for the Rubin Science Platform instance hosted at ``data.lsst.cloud``, the Notebook Aspect would be at ``notebook.data.lsst.cloud``, the Portal Aspect would be at ``portal.data.lsst.cloud``, and so forth.
   The authentication system itself would use ``auth.data.lsst.cloud``.
+  (Per-service granularity is ideal from a security standpoint, but this approach works with any granularity of hostnames.
+  We could instead group services into a small number of security domains and accept attacker movement within a security domain.)
 - The authentication session cookie for each of those services would be scoped to only that hostname and would use the ``__Host-`` prefix.
   See the `Set-Cookie documentation <https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie>`__ for more information about that prefix.
 - The cookie, encrypted in a key known only to Gafaelfawr, would contain the hostname for which the cookie was valid.
@@ -198,6 +206,9 @@ It's always preferable to apply principle of least privilege where possible.
 Service isolation (and particularly JavaScript isolation gained by the per-host cookie approach and separate hostnames for each protected service) would provide additional peace of mind when deploying third-party services with possibly poor security practices into the Rubin Science Platform.
 Requests for such services seem likely over the full course of the project.
 
+Implementing per-host cookies would let us choose the granularity of security domain that we want.
+For example, we could group all the Rubin-written services and the Notebook Aspect on one hostname and put third-party services on a different hostname, thus gaining protection against an attacker moving between those two security domains (but not within them).
+
 Recommendations
 ===============
 
@@ -205,4 +216,5 @@ Recommendations
    Live with this problem for now.
 #. Prioritize the user registration and external authentication flow and basic Kubernetes security until the risks in those areas are well-understood and reasonably mitigated.
 #. Implement support for the more complex login flow required for per-host service deployment once the user registration and external authentication flow work is complete.
-#. Plan on using per-service hostnames when deploying the Rubin Science Platform on the US Data Facility.
+#. Plan on using more granular hostnames when deploying the Rubin Science Platform on the US Data Facility.
+   At the least, separate core Rubin Science Platform services from third-party ancillary services that may be less secure or easier to attack.
