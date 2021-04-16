@@ -51,6 +51,8 @@ A related but slightly different problem is that, since all Rubin Science Platfo
 This means that a compromise of the web interface of any service (via XSS, for example) would allow an attacker to make authenticated requests to all other Rubin Science Platform services as the user.
 This has the same effect as stealing the user's authentication cookie but may be easier to accomplish.
 
+JupyterHub recommends `enabling subdomains <https://jupyterhub.readthedocs.io/en/stable/reference/websecurity.html>`__ so that each user's notebook is hosted in a unique subdomain for exactly this reason.
+
 The implication is that internal authorization controls between the Rubin Science Platform components are only fully effective provided that an attacker cannot gain access to the raw headers of a request to one of the components and cannot inject JavaScript into the web interface.
 
 Note that even if an attacker gains that access, they can only misuse credentials that are sent to the service while they have compromised that service.
@@ -109,10 +111,12 @@ If each protected service had its own authentication session cookie that was onl
 This could be done as follows:
 
 - Create a separate hostname for each service.
-  In other words, for the Rubin Science Platform instance hosted at ``data.lsst.cloud``, the Notebook Aspect would be at ``notebook.data.lsst.cloud``, the Portal Aspect would be at ``portal.data.lsst.cloud``, and so forth.
+  In other words, for the Rubin Science Platform instance hosted at ``data.lsst.cloud``, the Notebook Aspect would be at ``notebook.data.lsst.cloud`` (and ``username.notebook.data.lsst.cloud`` once a notebook has been launched), the Portal Aspect would be at ``portal.data.lsst.cloud``, and so forth.
   The authentication system itself would use ``auth.data.lsst.cloud``.
   (Per-service granularity is ideal from a security standpoint, but this approach works with any granularity of hostnames.
-  We could instead group services into a small number of security domains and accept attacker movement within a security domain.)
+  We could instead group services into a small number of security domains and accept attacker movement within a security domain.
+  The most important to separate are, first, the authentication system and the notebooks, and then, second, the Portal Aspect.
+  API services could probably be grouped into one hostname without much loss of security provided that the ``Authorization`` header is stripped.)
 - The authentication session cookie for each of those services would be scoped to only that hostname and would use the ``__Host-`` prefix.
   See the `Set-Cookie documentation <https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie>`__ for more information about that prefix.
 - The cookie, encrypted in a key known only to Gafaelfawr, would contain the hostname for which the cookie was valid.
