@@ -9,6 +9,10 @@ The current design for authentication for the Rubin Science Platform leaks cooki
 This undermines isolation between services, which could become relevant if a service is compromised.
 This document proposes several possible alternative designs, including one that uses separate hostnames for each Rubin Science Platform service, and discusses the complexity and effort trade-offs.
 
+See `DMTN-193`_ for a more general discussion of web security for the Science Platform.
+
+.. _DMTN-193: https://dmtn-193.lsst.io/
+
 Background
 ==========
 
