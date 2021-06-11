@@ -101,7 +101,7 @@ Disadvantages:
   This includes any request to a backend service that uses Gafaelfawr's OpenID Connect support instead.
   This could be mitigated by supporting a stripped-down ``auth_request`` handler mode that only cleans the headers and sending all requests, even unauthenticated requests, through an ``auth_request`` handler, at the cost of additional complexity and possible fragility.
 - This adds additional complexity to the required ingress configuration to use Gafaelfawr, which is already very complex.
-  If we take this approach, it may be worth adding Gafaelfawr support for a custom ingress resource and have Gafaelfawr add the appropriate annotations and generate the real ``Ingress` resource from that custom resource.
+  If we take this approach, it may be worth adding Gafaelfawr support for a custom ingress resource and have Gafaelfawr add the appropriate annotations and generate the real ``Ingress`` resource from that custom resource.
 - Does not isolate the JavaScript of each service.
   All services are still in the same JavaScript origin, which means that malicious JavaScript injected into any service could still make authenticated requests to other services, even though the attacker would not have direct access to the cookie.
 
