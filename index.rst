@@ -75,7 +75,7 @@ Replace ``Cookie`` and ``Authorization`` headers
 ------------------------------------------------
 
 While the ``auth_request`` handler cannot remove headers, NGINX and the Kubernetes ``Ingress`` annotations do provide a way of replacing headers in the request with headers returned by the ``auth_request`` handler before passing them to the backend.
-We could make use of this by having Gafaelfawr return a ``Cookie`` header that is the same as the incoming request but Gafaelfawr cookie stripped out of it, and then configure the ingress to replace the incoming header with that header via:
+We could make use of this by having Gafaelfawr return a ``Cookie`` header that is the same as the incoming request but with the Gafaelfawr cookie stripped out of it, and then configure the ingress to replace the incoming header with that header via:
 
 .. code-block:: yaml
 
