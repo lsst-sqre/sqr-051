@@ -5,13 +5,11 @@
 Abstract
 ========
 
-The current design for authentication for the Rubin Science Platform leaks cookies and user tokens to backend services.
+The original design for authentication for the Rubin Science Platform leaked cookies and user tokens to backend services.
 This undermines isolation between services, which could become relevant if a service is compromised.
 This document proposes several possible alternative designs, including one that uses separate hostnames for each Rubin Science Platform service, and discusses the complexity and effort trade-offs.
 
-See `DMTN-193`_ for a more general discussion of web security for the Science Platform.
-
-.. _DMTN-193: https://dmtn-193.lsst.io/
+See :dmtn:`193` for a more general discussion of web security for the Science Platform and :dmtn:`234` for the overall design of the Rubin Science Platform authentication system.
 
 Background
 ==========
@@ -23,8 +21,10 @@ Other clients authenticate with an ``Authorization`` header containing either a 
 Authentication in a browser is done via either OpenID Connect or OAuth 2 to an external authentication provider.
 Successful authentication then sets a session cookie in the browser, which is used to authenticate subsequent requests until that cookie expires.
 Rather than asking each application to verify that authentication cookie, the authentication verification is provided by a central service.
-That service, Gafaelfawr, can be invoked in one of two ways: using OpenID Connect if the protected application supports it natively, or by using an NGINX ``auth_request`` handler and configuration on the ingress of the application.
+That service, Gafaelfawr_, can be invoked in one of two ways: using OpenID Connect if the protected application supports it natively, or by using an NGINX ``auth_request`` handler and configuration on the ingress of the application.
 The ``auth_request`` handler approach is preferred for most Science Platform services.
+
+.. _Gafaelfawr: https://gafaelfawr.lsst.io/
 
 When an ``auth_request`` handler is used, the NGINX ingress for the Rubin Science Platform instance makes a subrequest to Gafaelfawr that includes the headers of the original browser request to the service URL.
 Gafaelfawr then locates the cookie, decrypts it, verifies the authentication credentials in that cookie, and (if successful) returns the results of that authentication verification in reply headers.
@@ -33,9 +33,7 @@ NGINX then can be configured to include those reply headers as request headers i
 Currently, a given deployment of the Rubin Science Platform uses a single hostname for all components.
 Different services are mounted on different routes under that hostname.
 For example, for a Rubin Science Platform deployment at ``https://data.lsst.cloud``, the Notebook Aspect is at ``https://data.lsst.cloud/nb``, the Portal Aspect is at ``https://data.lsst.cloud/portal``, and so forth.
-(`DMTN-076`_, not yet published, will propose a longer-term URL scheme for the Science Platform components.)
-
-.. _DMTN-076: https://dmtn-076.lsst.io/
+(:dmtn:`076`, not yet published, will propose a longer-term URL scheme for the Science Platform components.)
 
 In general, all services running on the Rubin Science Platform are trusted.
 In some cases, such as the Notebook Aspect, the running notebook is always given an authentication token with most of the permissions as the user's session cookie.
@@ -78,6 +76,8 @@ The following alternative designs would avoid exposing authentication credential
 Replace ``Cookie`` and ``Authorization`` headers
 ------------------------------------------------
 
+(This approach has now been implemented in Gafaelfawr_, including support for a stripped-down handler used with anonymous requests or requests authenticated another way, and a Kubernetes operator to construct the ``Ingress`` resources from a simpler custom resource.)
+
 While the ``auth_request`` handler cannot remove headers, NGINX and the Kubernetes ``Ingress`` annotations do provide a way of replacing headers in the request with headers returned by the ``auth_request`` handler before passing them to the backend.
 We could make use of this by having Gafaelfawr return a ``Cookie`` header that is the same as the incoming request but with the Gafaelfawr cookie stripped out of it, and then configure the ingress to replace the incoming header with that header via:
 
@@ -88,16 +88,21 @@ We could make use of this by having Gafaelfawr return a ``Cookie`` header that i
 (plus any additional headers from Gafaelfawr that the protected application uses).
 A simpler approach would work for the ``Authorization`` header: listing the header in ``auth-response-headers`` without sending that header in the ``auth_request`` handler response should strip the header from the request before sending it to the backend service.
 This would only work for services that do not reuse the ``Authorization`` header for their own purposes (JupyterHub does this).
+Alternately, we could take the same approach as with ``Cookie`` and return all ``Authorization`` headers that do not contain a Gafaelfawr token.
 
 For backend services that must receive a token in the ``Authorization`` header (CADC's TAP service is currently in this category), Gafaelfawr could be configured to return a delegated token in the ``Authorization`` header.
 
 Advantages:
+
+.. rst-class:: compact
 
 - Works transparently with the current Rubin Science Platform design, with no changes required to protected services, routes, or hostnames.
 - Addresses both the cookie and ``Authorization`` header cases.
 - Conceptually simple, and collects all of our request manipulation code in the same place (the Gafaelfawr ``auth_request`` handler).
 
 Disadvantages:
+
+.. rst-class:: compact
 
 - Requires parsing and surgery on the ``Cookie`` header in Gafaelfawr, which opens the possibility of unexpected browser interactions or problems with invalid but still working headers.
 - Only protects against token leakage to authenticated URLs that are protected by Gafaelfawr.
@@ -116,24 +121,28 @@ It may be possible to add NGINX configuration to remove the cookie from the prox
 It would still be present in the ``auth_request`` subrequest, but would not be sent to the destination host.
 See, for example, these instructions to `remove a specific cookie with NGINX <https://librenepal.com/article/remove-specific-cookies-with-nginx/>`__, which use the following snippet::
 
-  set $new_cookie $http_cookie;
-  if ($http_cookie ~ "(.*)(?:^|;)\s*some_cookie=[^;]+(.*)") {
-    set $new_cookie $1$2;
-  }
-  proxy_set_header Cookie $new_cookie;
+    set $new_cookie $http_cookie;
+    if ($http_cookie ~ "(.*)(?:^|;)\s*gafaelfawr=[^;]+(.*)") {
+      set $new_cookie $1$2;
+    }
+    proxy_set_header Cookie $new_cookie;
 
 A simpler approach also works for the ``Authorization`` header::
 
-  proxy_set_header Authorization "";
+    proxy_set_header Authorization "";
 
 However, the Notebook Aspect also uses the ``Authorization`` header for its own internal purposes, so the logic may need to be more complex, or the Notebook Aspect may need to be excluded.
 
 Advantages:
 
+.. rst-class:: compact
+
 - Works transparently with the current Rubin Science Platform design, with no changes required to protected services, routes, or hostnames.
 - Addresses both the cookie and ``Authorization`` header cases.
 
 Disadvantages:
+
+.. rst-class:: compact
 
 - Does not isolate the JavaScript of each service.
   All services are still in the same JavaScript origin, which means that malicious JavaScript injected into any service could still make authenticated requests to other services, even though the attacker would not have direct access to the cookie.
@@ -151,6 +160,8 @@ Use separate per-host cookies for each application
 If each protected service had its own authentication session cookie that was only usable by that service, and only that cookie was sent to requests for that service, that would eliminate the problem.
 
 This could be done as follows:
+
+.. rst-class:: compact
 
 - Create a separate hostname for each service.
   In other words, for the Rubin Science Platform instance hosted at ``data.lsst.cloud``, the Notebook Aspect would be at ``nb.data.lsst.cloud`` (and ``username.nb.data.lsst.cloud`` once a notebook has been launched), the Portal Aspect would be at ``portal.data.lsst.cloud``, and so forth.
@@ -172,6 +183,8 @@ This could still be implemented in the ``auth_request`` handler.
 
 The similar but more difficult problem of authenticating web services at arbitrary hostnames using OAuth 2 is handled as follows:
 
+.. rst-class:: compact
+
 #. Service sets a cookie containing a random state string.
    (The state string is required to prevent `session fixation <https://owasp.org/www-community/attacks/Session_fixation>`__.)
 #. Unauthenticated user is redirected to the identity provider, including the state string in the request.
@@ -183,6 +196,8 @@ The similar but more difficult problem of authenticating web services at arbitra
 
 In this case, since the same software component can act as both the protected service and the identity provider, step 6 can be simplified by using shared state.
 The login protocol would instead look like this:
+
+.. rst-class:: compact
 
 #. Service creates an encrypted cookie for its hostname containing a random state string.
 #. Service redirects the user to the ``/login`` route on the separate ``auth`` hostname for this Rubin Science Platform deployment and includes the state string and the return URL in that request.
@@ -206,6 +221,8 @@ This is the same process as OAuth 2 but without step 6 because external storage 
 
 Advantages:
 
+.. rst-class:: compact
+
 - Also provides protection against malicious JavaScript hosted by one Rubin Science Platform service by separating services into different JavaScript origins.
   Currently, all services are the same origin for JavaScript purposes, so malicious JavaScript hosted by any service can fool the browser into making authenticated requests to other services on behalf of the attacker.
   Separating the services into different origins would bring the normal JavaScript cross-origin request policy into play, which would provide substantial protection against lateral movement between services using JavaScript (via CSRF, for example).
@@ -214,6 +231,8 @@ Advantages:
 - Doesn't require any special NGINX configuration.
 
 Disadvantages:
+
+.. rst-class:: compact
 
 - Requires some significant changes to the authentication system to implement this new authentication flow.
 - Adds additional complexity to each internal authentication request (akin to using OpenID Connect internally).
@@ -262,11 +281,14 @@ For example, we could group all the core Rubin-written services other than the N
 Recommendations
 ===============
 
+.. rst-class:: compact
+
 #. Do nothing for the launch of the Intermediate Data Facility.
    Live with this problem for now.
 #. Add support for stripping cookies from the ``Cookie`` header and stripping or replacing the ``Authorization`` header to Gafaelfawr.
    This is relateively simple and already adds a lot of security benefit, although it doesn't protect against leakage on unauthenticated routes.
+   (This has now been done.)
 #. Prioritize the user registration and external authentication flow and basic Kubernetes security until the risks in those areas are well-understood and reasonably mitigated.
 #. Implement support for the more complex login flow required for per-host service deployment once the user registration and external authentication flow work is complete.
-#. Plan on using more granular hostnames when deploying the Rubin Science Platform on the US Data Facility.
+#. Plan on using more granular hostnames when deploying the Rubin Science Platform on the US Data Access Center.
    At the least, separate core Rubin Science Platform services from ancillary services that may be less secure or easier to attack.
