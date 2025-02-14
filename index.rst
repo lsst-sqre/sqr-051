@@ -1,13 +1,12 @@
-:tocdepth: 1
+##############################################################
+Leaks of credentials to services in the Rubin Science Platform
+##############################################################
 
-.. sectnum::
+.. abstract::
 
-Abstract
-========
-
-The original design for authentication for the Rubin Science Platform leaked cookies and user tokens to backend services.
-This undermines isolation between services, which could become relevant if a service is compromised.
-This document proposes several possible alternative designs, including one that uses separate hostnames for each Rubin Science Platform service, and discusses the complexity and effort trade-offs.
+   The original design for authentication for the Rubin Science Platform leaked cookies and user tokens to backend services.
+   This undermines isolation between services, which could become relevant if a service is compromised.
+   This document proposes several possible alternative designs, including one that uses separate hostnames for each Rubin Science Platform service, and discusses the complexity and effort trade-offs.
 
 See :dmtn:`193` for a more general discussion of web security for the Science Platform and :dmtn:`234` for the overall design of the Rubin Science Platform authentication system.
 
@@ -42,6 +41,11 @@ However, ideally, services should be as isolated from each other as is feasible,
 Problem statement
 =================
 
+.. note::
+
+   This is the original problem statement written prior to work to fix this problem.
+   The current implementation of Gafaelfawr_ implements several of the mitigations discussed below.
+
 The ``auth_request`` handler approach supplements the request headers but does not remove headers.
 Specifically, it does not remove any cookies the browser sends (nor can it drop all cookies, since protected applications may use their own cookies).
 Therefore, the authentication cookie used by Gafaelfawr to verify the user's authentication is also sent to the protected service in the HTTP headers.
@@ -54,12 +58,11 @@ If that service is compromised, the attacker can obtain that cookie from the inc
 This includes requests to the Gafaelfawr authentication service itself to, for instance, create new, persistent authentication tokens for that user that would be under the control of the attacker.
 
 A related but slightly different problem is that, since all Rubin Science Platform services are running under the same hostname, they all share the same JavaScript trust domain.
-This means that a compromise of the web interface of any service (via XSS, for example) would allow an attacker to make authenticated requests to all other Rubin Science Platform services as the user.
+This means that a compromise of the web interface of any service (via XSS, for example) would allow an attacker to make authenticated requests to all other Rubin Science Platform services as the same user.
 This has the same effect as stealing the user's authentication cookie but may be easier to accomplish.
-
 JupyterHub recommends `enabling subdomains <https://jupyterhub.readthedocs.io/en/stable/reference/websecurity.html>`__ so that each user's notebook is hosted in a unique subdomain for exactly this reason.
 
-The implication is that internal authorization controls between the Rubin Science Platform components are only fully effective if an attacker cannot gain access to the raw headers of a request to one of the components and cannot inject JavaScript into the web interface.
+Therefore, internal authorization controls between the Rubin Science Platform components are only fully effective if an attacker cannot gain access to the raw headers of a request to one of the components and cannot inject JavaScript into the web interface.
 
 Note that even if an attacker gains that access, they can only misuse credentials that are sent to the service while they have compromised that service.
 They cannot make requests as arbitrary users who have not accessed the compromised service.
@@ -76,7 +79,9 @@ The following alternative designs would avoid exposing authentication credential
 Replace ``Cookie`` and ``Authorization`` headers
 ------------------------------------------------
 
-(This approach has now been implemented in Gafaelfawr_, including support for a stripped-down handler used with anonymous requests or requests authenticated another way, and a Kubernetes operator to construct the ``Ingress`` resources from a simpler custom resource.)
+.. note::
+
+   This approach has been implemented in Gafaelfawr_, including support for a stripped-down handler used with anonymous requests or requests authenticated another way, and a Kubernetes operator to construct the ``Ingress`` resources from a simpler custom resource.
 
 While the ``auth_request`` handler cannot remove headers, NGINX and the Kubernetes ``Ingress`` annotations do provide a way of replacing headers in the request with headers returned by the ``auth_request`` handler before passing them to the backend.
 We could make use of this by having Gafaelfawr return a ``Cookie`` header that is the same as the incoming request but with the Gafaelfawr cookie stripped out of it, and then configure the ingress to replace the incoming header with that header via:
@@ -85,7 +90,8 @@ We could make use of this by having Gafaelfawr return a ``Cookie`` header that i
 
    nginx.ingress.kubernetes.io/auth-response-headers: Cookie
 
-(plus any additional headers from Gafaelfawr that the protected application uses).
+Any additional headers from Gafaelfawr the protected application uses would also be included.
+
 A simpler approach would work for the ``Authorization`` header: listing the header in ``auth-response-headers`` without sending that header in the ``auth_request`` handler response should strip the header from the request before sending it to the backend service.
 This would only work for services that do not reuse the ``Authorization`` header for their own purposes (JupyterHub does this).
 Alternately, we could take the same approach as with ``Cookie`` and return all ``Authorization`` headers that do not contain a Gafaelfawr token.
@@ -109,8 +115,8 @@ Disadvantages:
   Requests that do not go through an ``auth_request`` handler will still leak cookies and ``Authorization`` headers.
   This includes any request to a backend service that uses Gafaelfawr's OpenID Connect support instead.
   This could be mitigated by supporting a stripped-down ``auth_request`` handler mode that only cleans the headers and sending all requests, even unauthenticated requests, through an ``auth_request`` handler, at the cost of additional complexity and possible fragility.
-- This adds additional complexity to the required ingress configuration to use Gafaelfawr, which is already very complex.
-  If we take this approach, it may be worth adding Gafaelfawr support for a custom ingress resource and have Gafaelfawr add the appropriate annotations and generate the real ``Ingress`` resource from that custom resource.
+- Adds additional complexity to the required ingress configuration to use Gafaelfawr, which is already very complex.
+  If we take this approach, we should add Gafaelfawr support for a custom ingress resource and have Gafaelfawr add the appropriate annotations and generate the real ``Ingress`` resource from that custom resource.
 - Does not isolate the JavaScript of each service.
   All services are still in the same JavaScript origin, which means that malicious JavaScript injected into any service could still make authenticated requests to other services, even though the attacker would not have direct access to the cookie.
 
@@ -119,13 +125,22 @@ Strip Gafaelfawr cookie from proxied request
 
 It may be possible to add NGINX configuration to remove the cookie from the proxied request.
 It would still be present in the ``auth_request`` subrequest, but would not be sent to the destination host.
-See, for example, these instructions to `remove a specific cookie with NGINX <https://librenepal.com/article/remove-specific-cookies-with-nginx/>`__, which use the following snippet::
+See, for example, these instructions to `remove a specific cookie with NGINX <https://stackoverflow.com/questions/67548886/remove-specific-cookie-in-nginx-reverse-proxy>`__, which use the following snippet::
 
-    set $new_cookie $http_cookie;
-    if ($http_cookie ~ "(.*)(?:^|;)\s*gafaelfawr=[^;]+(.*)") {
-      set $new_cookie $1$2;
+    # save original "Cookie" header value
+    set $altered_cookie $http_cookie;
+
+    # check if the "my_cookie" cookie is present
+    if ($http_cookie ~ '(.*)(^|;\s)my_cookie=("[^"]*"|[^\s]*[^;]?)(\2|$|;$)(?:;\s)?(.*)') {
+        # cut "my_cookie" cookie from the string
+        set $altered_cookie $1$4$5;
     }
-    proxy_set_header Cookie $new_cookie;
+
+    # hide original "Cookie" header
+    proxy_hide_header Cookie;
+
+    # set "Cookie" header to the new value
+    proxy_set_header  Cookie $altered_cookie;
 
 A simpler approach also works for the ``Authorization`` header::
 
@@ -166,10 +181,10 @@ This could be done as follows:
 - Create a separate hostname for each service.
   In other words, for the Rubin Science Platform instance hosted at ``data.lsst.cloud``, the Notebook Aspect would be at ``nb.data.lsst.cloud`` (and ``username.nb.data.lsst.cloud`` once a notebook has been launched), the Portal Aspect would be at ``portal.data.lsst.cloud``, and so forth.
   The authentication system itself would use ``auth.data.lsst.cloud``.
-  (Per-service granularity is ideal from a security standpoint, but this approach works with any granularity of hostnames.
+  Per-service granularity is ideal from a security standpoint, but this approach works with any granularity of hostnames.
   We could instead group services into a small number of security domains and accept attacker movement within a security domain.
-  The most important to separate are, first, the authentication system and the notebooks, and then, second, the Portal Aspect.
-  API services could probably be grouped into one hostname without much loss of security provided that the ``Authorization`` header is stripped.)
+  The most important to separate are, in order, user notebooks, the Portal Aspect, and any third-party service that issues its own authentication cookies, such as services that use OpenID Connect.
+  API services could probably be grouped into one hostname without much loss of security provided that the ``Authorization`` header is stripped.
 - The authentication session cookie for each of those services would be scoped to only that hostname and would use the ``__Host-`` prefix.
   See the `Set-Cookie documentation <https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie>`__ for more information about that prefix.
 - The cookie, encrypted in a key known only to Gafaelfawr, would contain the hostname for which the cookie was valid.
@@ -266,13 +281,10 @@ This work should be coupled with enabling per-user notebook URLs for JupyterHub.
 It's not clear how important fixing this issue is relative to other security work that we could be doing.
 The boundaries between services inside the Rubin Science Platform are not that strong, by design.
 For example, a spawned server in the Notebook Aspect, by design, should be able to make any API call to any other service on behalf of the user except for the authentication service itself.
-The benefits of isolating the services from each other are only significant if effort is also invested into defining scopes for tokens, setting authorization rules on services, and restricting the scopes of internal tokens issued to services.
-Very little of that work has yet been done.
-Protecting the external attack surface and basic authentication flow of the Rubin Science Platform is currently a higher priority.
 
 That said, isolating services from each other to make lateral movement by an attacker more difficult is a long-term security goal.
 It's always preferable to apply principle of least privilege where possible.
-Service isolation (and particularly JavaScript isolation gained by the per-host cookie approach and separate hostnames for each protected service) would provide additional peace of mind when deploying third-party services with possibly poor security practices into the Rubin Science Platform.
+Service isolation (and particularly JavaScript isolation gained by the separate hostnames for each protected service) would provide additional peace of mind when deploying third-party services with possibly poor security practices into the Rubin Science Platform.
 Requests for such services seem likely over the full course of the project.
 
 Implementing per-host cookies would let us choose the granularity of security domain that we want.
@@ -289,6 +301,5 @@ Recommendations
    This is relateively simple and already adds a lot of security benefit, although it doesn't protect against leakage on unauthenticated routes.
    (This has now been done.)
 #. Prioritize the user registration and external authentication flow and basic Kubernetes security until the risks in those areas are well-understood and reasonably mitigated.
-#. Implement support for the more complex login flow required for per-host service deployment once the user registration and external authentication flow work is complete.
-#. Plan on using more granular hostnames when deploying the Rubin Science Platform on the US Data Access Center.
-   At the least, separate core Rubin Science Platform services from ancillary services that may be less secure or easier to attack.
+   (This is now mostly under control.)
+#. Implement support for the more complex login flow required for per-host service deployment and separate at least user notebooks into their own origins.
